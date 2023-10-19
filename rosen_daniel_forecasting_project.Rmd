@@ -1,7 +1,7 @@
 ---
 title: "Forecasting Project"
 author: "DANIEL ROSEN"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -13,7 +13,7 @@ library(lubridate)
 library(forecast)
 ```
 
-The goal of this project is to forecast the England's future wind power usage. Since 2016 England has began increasing its use of wind power. I am curious if and how that trend will continue. To conduct this analysis, I grabbed a time series data set from https://www.gridwatch.templar.co.uk/, a website which monitors electricity usage in England in real time. This dataset is a csv which contains time series data about total demand and output levels of different energy sources, with data points from every 5 minutes since 12:00 AM, January 1, 2012 until 11:55 PM, October 15, 2023. Within this data set there are 23 variables with all electricity measurements in Gigawatts, one for total demand, one for frequency which represents the imbalance between supply and demand, one for the measure of power flow recorded from the North to the South of England, and 21 for different energy sources, plus an id column and a timestamp column. These energy sources are coal, nuclear, combine cycle turbine stations, wind, pumped hydroelectric, hydroelectric, biomass, oil, solar, open cycle turbine plants, import/export amounts from France, Nederlands, Ireland, Wales, Belgium, Scotland, Norway, and other which represents all other sources. 
+The goal of this project is to forecast the UK's future wind power usage. Since 2016 UK has began increasing its use of wind power. I am curious if and how that trend will continue. To conduct this analysis, I grabbed a time series data set from https://www.gridwatch.templar.co.uk/, a website which monitors electricity usage in UK in real time. This dataset is a csv which contains time series data about total demand and output levels of different energy sources, with data points from every 5 minutes since 12:00 AM, January 1, 2012 until 11:55 PM, October 15, 2023. Within this data set there are 23 variables with all electricity measurements in Gigawatts, one for total demand, one for frequency which represents the imbalance between supply and demand, one for the measure of power flow recorded from the North to the South of UK, and 21 for different energy sources, plus an id column and a timestamp column. These energy sources are coal, nuclear, combine cycle turbine stations, wind, pumped hydroelectric, hydroelectric, biomass, oil, solar, open cycle turbine plants, import/export amounts from France, Nederlands, Ireland, Wales, Belgium, Scotland, Norway, and other which represents all other sources.
 
 ## Forecasting Considerations
 
@@ -104,21 +104,25 @@ aggregated_to_date <- reduced %>%
 
 glimpse(aggregated_to_date)
 ```
-This leaves us with only 4,306 rows. This is not too large and should hopefully be a good level of granularity. If not, we can aggregate further later. Next, let's drop the id column, the timestamp column, and the frequency column as we can assume that this measure will generally not fluctuate much, and if it does, it means England does not have enough power to mean its citizens' demands. We can assume this will only happen during an emergency which would be an outlier and would not be useful in forecasting.
+This leaves us with only 4,306 rows. This is not too large and should hopefully be a good level of granularity. If not, we can aggregate further later. Next, let's drop the id column, the timestamp column, and the frequency column as we can assume that this measure will generally not fluctuate much, and if it does, it means UK does not have enough power to mean its citizens' demands. We can assume this will only happen during an emergency which would be an outlier and would not be useful in forecasting.
 
 ```{r}
-england_power <- aggregated_to_date %>% select(-c(id, frequency, timestamp))
-glimpse(england_power)
+UK_power <- aggregated_to_date %>% select(-c(id, frequency, timestamp))
+glimpse(UK_power)
+```
+Now let's get all variables in terms of gigawatts:
+```{r}
+UK_power[, sapply(UK_power, is.numeric)] <- UK_power[, sapply(UK_power, is.numeric)] / 1000
 ```
 
 
 Finally, let's save this processed dataset to a csv and create a tsibble to work with.
 
 ```{r}
-write.csv(england_power, "./data/england_power_processed.csv")
+write.csv(UK_power, "./data/UK_power_processed.csv")
 
-england_power_ts <- as_tsibble(england_power, index=date)
-england_power_ts
+UK_power_ts <- as_tsibble(UK_power, index=date)
+UK_power_ts
 ```
 This seems like an excellent time series.
 ## Decomposition
@@ -133,7 +137,7 @@ Trend and seasonality were decomposed and their appropriateness were discussed. 
 Let's begin exploring our data. First let's graph our variables over time and our target variable `wind` over time.
 
 ```{r}
-ggplot(england_power_ts, aes(x = date)) +
+ggplot(UK_power_ts, aes(x = date)) +
   geom_line(aes(y = demand, color = "Demand"), size = 1) +
   geom_line(aes(y = wind, color = "Wind power"), size = 1) +
   ggtitle("Demand and Wind Usage over Time") +
@@ -143,7 +147,7 @@ ggplot(england_power_ts, aes(x = date)) +
 This data is highly variable. I think it will be a good idea to further aggregate to monthly averages. This will allow us to handle seasonality better and since we are predicting into the future and looking for general trends, monthly average predictions are likely better anyways as they give us a lower variance understanding of supply and demand. Let's do that now.
 
 ```{r}
-aggregated_to_month <- as.data.frame(england_power_ts) %>%
+aggregated_to_month <- as.data.frame(UK_power_ts) %>%
   mutate(date_months = tsibble::yearmonth(floor_date(date, "month"))) %>%
   group_by(date_months) %>%
   summarise(
@@ -156,21 +160,21 @@ aggregated_to_month <- as.data.frame(england_power_ts) %>%
     )
 
 
-england_power_monthly_ts <- as_tsibble(
+UK_power_monthly_ts <- as_tsibble(
   aggregated_to_month %>% select(-date) %>% rename(c(date = date_months)),
   index = date)
 
-#england_power_monthly_ts <- england_power_monthly_ts %>% fill_gaps() %>% drop_na()
+#UK_power_monthly_ts <- UK_power_monthly_ts %>% fill_gaps() %>% drop_na()
 
 # Fill NA values with the previous non-NA value
-#england_power_monthly_ts <- england_power_monthly_ts %>% 
+#UK_power_monthly_ts <- UK_power_monthly_ts %>% 
   #fill(everything(), .direction = "down")
 
-glimpse(england_power_monthly_ts)
+glimpse(UK_power_monthly_ts)
 ```
 Let's plot it again to see how it looks.
 ```{r}
-ggplot(england_power_monthly_ts, aes(x = date)) +
+ggplot(UK_power_monthly_ts, aes(x = date)) +
   geom_line(aes(y = demand, color = "Demand"), size = 1) +
   geom_line(aes(y = wind, color = "Wind power"), size = 1) +
   ggtitle("Demand and Wind Usage over Time") +
@@ -179,13 +183,13 @@ ggplot(england_power_monthly_ts, aes(x = date)) +
 ```
 That looks much better! Lets save that as a csv and continue.
 ```{r}
-write.csv(england_power_monthly_ts, './data/england_power_monthly.csv')
+write.csv(UK_power_monthly_ts, './data/UK_power_monthly.csv')
 ```
 
 
 Now let's inspect all of our predictor variables.
 ```{r}
-england_power_monthly_ts %>%
+UK_power_monthly_ts %>%
   gather(
     "energy_source",
     "average_monthly_usage",
@@ -194,20 +198,20 @@ england_power_monthly_ts %>%
   ggplot(aes(x = date, y = average_monthly_usage, colour = energy_source)) +
   geom_line() +
   facet_grid(vars(energy_source), scales = "free_y") +
-  labs(y="Average Monthly Usage (GW)") +
+  labs(title="UK's Power Usage by Source + Total Demand", y="Average Monthly Usage (GW)") +
   guides(colour="none")
 ```
 These look great! The one observation I am taking away from this is total demand has had a slight downard trend. This is interesting, as one might expect that as time goes on, populations will continue to rise and therefore demand should too. The data implies that this is not actually the case. 
 
 Now let's explore trend and seasonality. 
 ```{r}
-england_power_monthly_ts %>%
+UK_power_monthly_ts %>%
   gg_tsdisplay(wind, plot_type="partial")
 ```
 ### Let's analyze these graphs. 
 
 Time series Plot:
-From this plot it is easily observed that there exists a noticeable upward trend in the wind power usage. Further, there appears to be regular peaks and valleys, suggesting a seasonal component. Contextually, these make sense as we know England has increased its wind power usage and throughout the year, due to changes in temperature amongst other things power demand fluctuates and therefore, since wind makes up a percentage the supply of the power output to meet that demand.
+From this plot it is easily observed that there exists a noticeable upward trend in the wind power usage. Further, there appears to be regular peaks and valleys, suggesting a seasonal component. Contextually, these make sense as we know UK has increased its wind power usage and throughout the year, due to changes in temperature amongst other things power demand fluctuates and therefore, since wind makes up a percentage the supply of the power output to meet that demand.
 
 ACF (Autocorrelation Function) Plot:
 There are several things to take away from this graph.
@@ -226,7 +230,7 @@ What to take away form this plot:
 Now, that there is evidence that the time series is not stationary, lets perform the Ljung-Box test to confirm if the time series is in fact not stationary. 
 
 ```{r}
-england_power_monthly_ts %>%
+UK_power_monthly_ts %>%
   features(wind, unitroot_kpss) %>% as.matrix()
 ```
 Because the test statistic is less than .05, we know that the time series is non-stationary. We can interpret this as, the likelihood that there is not an effect of the old points is very low.
@@ -234,25 +238,25 @@ Because the test statistic is less than .05, we know that the time series is non
 Knowing this, let's now check if differencing and or seasonal differencing should be performed to make the time series stationary.
 ```{r}
 #Differencing
-england_power_monthly_ts %>% features(wind, unitroot_ndiffs) %>%
+UK_power_monthly_ts %>% features(wind, unitroot_ndiffs) %>%
   as.matrix()
 
 #Seasonal Differencing
-england_power_monthly_ts %>% features(wind, unitroot_nsdiffs) %>%
+UK_power_monthly_ts %>% features(wind, unitroot_nsdiffs) %>%
   as.matrix()
 ```
 From our results, it appears that it is necessary to perform one round of differencing and one round of seasonal differencing to make our data stationary. 
 
 First, let's take the difference and observe our plots then decide what lag we should difference at for seasonal differencing. 
 ```{r}
-england_power_monthly_ts %>%
+UK_power_monthly_ts %>%
   gg_tsdisplay(difference(wind), plot_type="partial")
 ```
 After taking the first difference it appears the trend has been removed but it appears some seasonality remains. Looking at the acf plot, it seems like taking a seasonal difference at 12 months makes season, especially since we already suspect there is annual seasonality. One thing to keep in mind, is that there appears to be an outlier circa 2023 which may need to be accounted for for a TSLM.
 
 Now let's take a seasonal difference.
 ```{r}
-england_power_monthly_ts %>%
+UK_power_monthly_ts %>%
   gg_tsdisplay(difference(difference(wind), lag=12), plot_type="partial")
 ```
 Looking at our results, it appears that there are still some significant lags. The most significant of these are 1 and 12 for the acf and 1 and 11 for the pacf. Generally though, these values look as though are data is stationary and ready for modeling. 
@@ -260,13 +264,13 @@ Looking at our results, it appears that there are still some significant lags. T
 
 Finally, let's see if colinearity exists between our variables.
 ```{r}
-colnames(england_power_monthly_ts)
+colnames(UK_power_monthly_ts)
 ```
 
 ```{r}
 
 lm_fit <- lm(wind ~ demand + coal + nuclear + ccgt + pumped + hydro + total_other,
-             data = england_power_monthly_ts)
+             data = UK_power_monthly_ts)
 
 regclass::VIF(lm_fit)
 ```
@@ -274,7 +278,7 @@ If we were to set a threshold a 5, our two variables which are above the thresho
 
 ```{r}
 lm_fit <- lm(wind ~ demand + nuclear + ccgt + pumped + hydro + total_other,
-             data = england_power_monthly_ts)
+             data = UK_power_monthly_ts)
 
 regclass::VIF(lm_fit)
 ```
@@ -290,7 +294,7 @@ At least two different models were considered. Model fit and residual diagnostic
 Before any models are fit, let's first create a training and testing split with out data. Let's also create a variable to handle the outlier in our data and drop the coal variable to reduce colinearity.
 
 ```{r}
-model_ts <- england_power_monthly_ts %>%
+model_ts <- UK_power_monthly_ts %>%
   select(-coal)
 
 model_ts$outlier <- rep(0, nrow(model_ts))
@@ -403,7 +407,9 @@ temp2 = test_predictions %>%
 
 left_join(temp1, temp2, by = ".model") %>% select(-.type)
 ```
-Looking at the distributional and point accuracies, we can see that on almost every metric, the SARIMA model is the most performant. That being said, when looking at the MAPE metric, which is generally the most common time series metric, ETS is very slightly better. MAPE measures how well the predictions matched the line over the whole period and like we said earlier, ETS does appear to model our test set well. Regardless, because we saw that our error bands from the prediction plot showed that ETS is more variable and because SARIMA is better in every other regard, we will choose SARIMA as our final predictor model.
+Looking at the distributional and point accuracies, we can see that on almost every metric, the SARIMA model is the most performant. That being said, when looking at the MAPE metric, which is generally the most common time series metric, ETS is very slightly better. MAPE measures how well the predictions matched the line over the whole period and like we said earlier, ETS does appear to model our test set well. 
+
+With these results in mind, we will make final predictions using both a SARIMA and ETS model. That being said, because SARIMA performed better on almost every metric and because the variance of its errors was significantly smaller, if the predictions are wildly different, we will trust the SARIMA's prediction more. 
 
 ## Forecast
 
@@ -412,14 +418,88 @@ Looking at the distributional and point accuracies, we can see that on almost ev
 At least one forecast was made using actual data and another using a forecasting method. Forecasts were visualized and confidence bands were interpreted. Point and distributional fit measures were discussed for both.
 
 -->
+We will now make a forecast Since the total wind power usage in UK in 2030. Since neither ETS or SARIMA need additional data to make a forecast, we can skip over the data generating process. 
+
+Before anything, we need to refit our models to our entire dataset.
+
+```{r}
+final_model_fits <- UK_power_monthly_ts %>%
+  model(
+    ets = ETS(wind),
+    sarima = ARIMA(wind~pdq(1,0,0) + PDQ(0, 1, 1))
+)
+
+start_date = max(UK_power_monthly_ts$date)+1
+end_date = yearmonth(ymd("2030-12-01"))
+prediction_dates = seq(start_date, end_date, by=1)
+
+final_forecasts <- final_model_fits %>%
+  forecast(h=length(prediction_dates))
+
+final_forecasts
+```
+Before we interpret these results, let's first make a linear model for demand to see if our results make sense given some context.
+```{r}
+demand_fit <- lm(
+  demand ~ date,
+  data=UK_power_monthly_ts
+)
+
+demand_predictions <- predict.lm(demand_fit, newdata = data.frame(date=prediction_dates))
+```
+
+Now, let's plot everything. 
+```{r}
+final_forecasts %>%
+  autoplot() +
+  geom_line(
+    data = UK_power_monthly_ts %>% filter(year(date) > 2018),
+    aes(y=wind, color='train')
+  ) +
+  geom_line(
+    data = UK_power_monthly_ts %>% filter(year(date) > 2018),
+    aes(y=demand, color='Actual Demand')
+  ) +
+  geom_line(
+    data = data.frame(date=final_forecasts$date, demand=demand_predictions),
+    aes(y=demand, color='Demand Linear Model')
+  ) +
+  labs(
+    title = "Final Model Forecasts for UK's Wind Power Usage Through 2030",
+    subtitle = "Compared with Real and Estimated Total Power Demand",
+    y = "Gigawatts",
+    x = "Date"
+  )
+```
+
 
 ## Interpretation
 
-<!-- For full points:
+Final Predictions For UK's wind power usage in December 2023:
+```{r}
+as.data.frame(final_forecasts) %>%
+  filter(date == yearmonth("2030 Dec")) %>%
+  select("Model"=.model, "Wind Power Forecast For December 2030 (GW)" = .mean)
+```
 
-Interpretation of the forecast was based on past and present knowledge of the stock and how it's situated in the investment ecosystem. Differences between forecast and actual are discussed based on current knowledge or events.
+Before contextualizing and interpreting our predictions, let's first analyze our graph:
 
--->
+Beginning with our predictions, it appears that both ETS and SARIMA captured the cyclical nature as well as the trend of the UK's current wind power output. Looking closer it appears that ETS model's predictions have slightly higher peaks and noticeably lower valleys. When compared to the actual data, these valleys seem to be somewhat of underestimates. Again, as we said previously, we are inclined to trust our SARIMA model more. When looking at our final predictions for December of 2030, ETS predicts a slightly higher value of 14.51 gigawatts of wind power production while SARIMA predicts 12.44 gigawatts. This has to do with ETS having slightly higher peaks and SARIMA capturing small negative dips before its maximum of each seasonal cycle and our predictions being cut off right before its maximum. Next, looking at the demand predictions we can see our linear model predicts a continued, steep, downward trend. Contextually, this makes sense with data as we had seen a downward trend in demand for some years, but intuitively this is likely not a good prediction and this trend will not continue as the population will continue to grow which will drive demand upwards. 
+
+Now let's reconcile our results real world information:
+
+According to renewableUK [1], the UK's target for onshore wind power capacity by 2030 is 30 gigawatts (GW). This is up from the current capacity of 13.8 GW.The UK's target for offshore wind power capacity by 2030 is 50 GW. Total, the UK has the ambitious goal of reaching 80GW of wind power by 2030. This capacity would be enough to power every home in Britain and would support the UK target of reaching net zero by 2050. [2] To reach this goal though, the UK would need to install an estimated 3,200 new, larger wind turbines by 2030. This would be roughly three new turbines every two days. It is questionable if this is feasible. It is especially questionable since, according to The Guardian [3], that the English windfarms built onshore in the seven years since the restrictions were introduced have reached a total capacity of only 6.7 megawatts [as of four months ago]. This is just 0.02% of the onshore wind needed in England based on forecasts provided by National Grid to meets its share of the UK's goal. Although other parts of the UK are contributing more significantly, at this pace it would take 4,690 years for England to meet its share of this target.
+
+So do our predictions make sense?
+
+The ETS and SARIMA predictions for wind power output in the UK by 2030 are considerably below the country's ambitious target of 80GW. These models, based on historical data with no consideration for goverment pledges or goals, suggest a more conservative growth trajectory for wind power which follows current trends shown in output. On the other hand, the UK's ambitious goals, while commendable, face substantial challenges, notably the current slow pace of turbine installations in areas like England. Given these factors, it's plausible and in my opinion likely, that the actual wind power output for 2030 will fall somewhere between the model predictions and the government's targets. The predictions, while potentially undervaluing the output based on governmental aims, may be closer to a realistic scenario considering the recent installation trends and challenges.
+
+Thanks for following along!
+
+
+
+
+
 
 
 
