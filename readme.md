@@ -1,9 +1,9 @@
-Forecasting Project
+Forecasting UK Wind Power Usage for 2030
 ================
-DANIEL ROSEN
+Author: Daniel Rosen
 
 The goal of this project is to forecast the UK’s future wind power
-usage. Since 2016 the UK has began increasing its use of wind power. I
+usage in 2030. Since 2016 the UK has began increasing its use of wind power. I
 am curious if and how that trend will continue. To conduct this
 analysis, I grabbed a time series data set from
 <https://www.gridwatch.templar.co.uk/>, a website which monitors
