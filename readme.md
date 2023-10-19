@@ -3,11 +3,11 @@ Forecasting Project
 DANIEL ROSEN
 
 The goal of this project is to forecast the UK’s future wind power
-usage. Since 2016 UK has began increasing its use of wind power. I am
-curious if and how that trend will continue. To conduct this analysis, I
-grabbed a time series data set from
+usage. Since 2016 the UK has began increasing its use of wind power. I
+am curious if and how that trend will continue. To conduct this
+analysis, I grabbed a time series data set from
 <https://www.gridwatch.templar.co.uk/>, a website which monitors
-electricity usage in UK in real time. This dataset is a csv which
+electricity usage in the UK in real time. This data set is a csv which
 contains time series data about total demand and output levels of
 different energy sources, with data points from every 5 minutes since
 12:00 AM, January 1, 2012 until 11:55 PM, October 15, 2023. Within this
@@ -21,11 +21,7 @@ hydroelectric, hydroelectric, biomass, oil, solar, open cycle turbine
 plants, import/export amounts from France, Nederlands, Ireland, Wales,
 Belgium, Scotland, Norway, and other which represents all other sources.
 
-## Forecasting Considerations
-
-<!-- For full points:
-&#10;Additional factors were considered thoroughly. One or more additional factors were modeled.
-&#10;-->
+# Forecasting Considerations
 
 ### Processing:
 
@@ -64,13 +60,14 @@ glimpse(raw)
     ## $ intelec_ict      <int> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
     ## $ nsl              <int> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
 
-Wow this is a large dataset. I believe it is a good idea to reduce the
-number of features and the number of rows. Let’s do this now. First we
-will combine the ict columns, nemo, and nsl columns with the other
-column then remove the originals. Also, it appears oil, solar, biomass,
-and ocgt are only occasionally used so lets add them to other as well.
-Let’s also remove the north_south column as this likely won’t be a good
-predictor for coal usage.
+Wow, this is a large data set. I believe it is a good idea to reduce the
+number of features and the number of rows. To do this, we will first
+combine the ict columns, nemo, and nsl columns with the ‘other’ column,
+then remove the originals. Also, it appears oil, solar, biomass, and
+ocgt are only occasionally used, so lets add them to other as well.
+Finally, let’s also remove the north_south as it simply represents the
+amount of energy flowing from the north of England to the South and this
+likely won’t be a good predictor for wind usage.
 
 ``` r
 library(dplyr)
@@ -133,9 +130,11 @@ glimpse(reduced)
     ## $ hydro       <int> 636, 633, 634, 635, 637, 637, 635, 635, 636, 634, 635, 637…
     ## $ total_other <dbl> 498, 498, 498, 486, 486, 486, 486, 486, 486, 582, 582, 582…
 
-We can see that total_other now is non_zero but is relatively small
-compared to other sources. This seems like a better predictor now and
-will probably aid the models’ training time.
+We can see that total_other is now non-zero but is still relatively
+small compared to other sources. This seems like a better predictor now
+and will probably aid the models’ training time.
+
+Here we see we have an outlier in our data.
 
 ``` r
 min(reduced$total_other)
@@ -172,8 +171,10 @@ min(reduced$total_other)
 
     ## [1] 0
 
-Now, because we are only predicting if coal usage will continue going
-down, we do not need the granularity of time points every five minutes.
+It appears that this worked.
+
+Now, because we are only predicting if wind usage will continue going
+up, we do not need the granularity of time points every five minutes.
 Let’s aggregate to daily averages and see how many rows we are left with
 to see if we need to aggregate further.
 
@@ -266,11 +267,9 @@ UK_power_ts
     ## 10 2011-06-05   29.9  5.86    8.81  11.8 1.05   0.292 0.384       1.32 
     ## # … with 4,514 more rows
 
-This seems like an excellent time series. \## Decomposition
+This seems like an excellent time series.
 
-<!-- For full points:
-&#10;Trend and seasonality were decomposed and their appropriateness were discussed. Model parameters were reported. Visualizations were used.
-&#10;-->
+# Decomposition
 
 ### Exploration
 
@@ -287,12 +286,13 @@ ggplot(UK_power_ts, aes(x = date)) +
 ```
 
 ![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
 This data is highly variable. I think it will be a good idea to further
 aggregate to monthly averages. This will allow us to handle seasonality
 better and since we are predicting into the future and looking for
-general trends, monthly average predictions are likely better anyways as
-they give us a lower variance understanding of supply and demand. Let’s
-do that now.
+general trends, monthly average predictions are likely better explainers
+anyways, as they give us a lower variance understanding of supply and
+demand. Let’s do that now.
 
 ``` r
 aggregated_to_month <- as.data.frame(UK_power_ts) %>%
@@ -311,12 +311,6 @@ aggregated_to_month <- as.data.frame(UK_power_ts) %>%
 UK_power_monthly_ts <- as_tsibble(
   aggregated_to_month %>% select(-date) %>% rename(c(date = date_months)),
   index = date)
-
-#UK_power_monthly_ts <- UK_power_monthly_ts %>% fill_gaps() %>% drop_na()
-
-# Fill NA values with the previous non-NA value
-#UK_power_monthly_ts <- UK_power_monthly_ts %>% 
-  #fill(everything(), .direction = "down")
 
 glimpse(UK_power_monthly_ts)
 ```
@@ -345,13 +339,14 @@ ggplot(UK_power_monthly_ts, aes(x = date)) +
 ```
 
 ![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
 That looks much better! Lets save that as a csv and continue.
 
 ``` r
 write.csv(UK_power_monthly_ts, './data/UK_power_monthly.csv')
 ```
 
-Now let’s inspect all of our predictor variables.
+Now, let’s inspect all of our predictor variables.
 
 ``` r
 UK_power_monthly_ts %>%
@@ -368,13 +363,14 @@ UK_power_monthly_ts %>%
 ```
 
 ![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
-These look great! The one observation I am taking away from this is
-total demand has had a slight downard trend. This is interesting, as one
-might expect that as time goes on, populations will continue to rise and
-therefore demand should too. The data implies that this is not actually
-the case.
 
-Now let’s explore trend and seasonality.
+These look great! The one observation I am taking away from this is
+total demand has had a slight downward trend. This is interesting, as
+one might expect that as time goes on, populations will continue to rise
+and therefore demand should too.
+
+Next, let’s explore trend and seasonality for our target variable
+‘wind’.
 
 ``` r
 UK_power_monthly_ts %>%
@@ -382,19 +378,23 @@ UK_power_monthly_ts %>%
 ```
 
 ![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
-\### Let’s analyze these graphs.
 
-Time series Plot: From this plot it is easily observed that there exists
-a noticeable upward trend in the wind power usage. Further, there
-appears to be regular peaks and valleys, suggesting a seasonal
-component. Contextually, these make sense as we know UK has increased
-its wind power usage and throughout the year, due to changes in
-temperature amongst other things power demand fluctuates and therefore,
-since wind makes up a percentage the supply of the power output to meet
-that demand.
+Let’s analyze these graphs.
 
-ACF (Autocorrelation Function) Plot: There are several things to take
-away from this graph.
+**Time series Plot:**
+
+From this plot, it is easily observed that there exists a noticeable
+upward trend in the wind power usage which is in line with what we
+already know. Further, there appears to be regular peaks and valleys,
+suggesting a seasonal component. Contextually, these make sense as we
+know UK has increased its wind power usage over time, and throughout the
+year, due to changes in temperature amongst other things, power demand
+fluctuates and therefore. Since wind makes up a percentage of power
+supply, we should expect it to have a similar shape.
+
+**ACF (Autocorrelation Function) Plot:**
+
+There are several things to take away from this graph.
 
 - The auto-correlations show a slow decay with significant values at
   specific lags. This provides futher evidence for both an underlying
@@ -402,10 +402,11 @@ away from this graph.
 - The significant spike around the 12-month mark suggests an annual
   seasonality in the data.
 - The lack of a quick decay of the auto-correlations suggests that the
-  data is likely not stationary.
+  data is not stationary.
 
-PACF (Partial Autocorrelation Function) Plot: What to take away form
-this plot:
+**PACF (Partial Autocorrelation Function) Plot:**
+
+What to take away form this plot:
 
 - The significance spike at Lag 1 implies that the current value is
   directly influenced by its immediate previous value. This can indicate
@@ -416,7 +417,7 @@ this plot:
   somewhat distant past. Because it is more significant around 12
   months, it adds further evidence for annual seasonality.
 
-Now, that there is evidence that the time series is not stationary, lets
+Now that there is evidence that the time series is not stationary, let’s
 perform the Ljung-Box test to confirm if the time series is in fact not
 stationary.
 
@@ -454,11 +455,10 @@ UK_power_monthly_ts %>% features(wind, unitroot_nsdiffs) %>%
     ## [1,]       1
 
 From our results, it appears that it is necessary to perform one round
-of differencing and one round of seasonal differencing to make our data
+of differencing or one round of seasonal differencing to make our data
 stationary.
 
-First, let’s take the difference and observe our plots then decide what
-lag we should difference at for seasonal differencing.
+First, let’s see what happens if we do one normal difference.
 
 ``` r
 UK_power_monthly_ts %>%
@@ -466,6 +466,7 @@ UK_power_monthly_ts %>%
 ```
 
 ![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+
 After taking the first difference it appears the trend has been removed
 but it appears some seasonality remains. Looking at the acf plot, it
 seems like taking a seasonal difference at 12 months makes season,
@@ -477,14 +478,27 @@ Now let’s take a seasonal difference.
 
 ``` r
 UK_power_monthly_ts %>%
-  gg_tsdisplay(difference(difference(wind), lag=12), plot_type="partial")
+  gg_tsdisplay(difference(wind, lag=12), plot_type="partial")
 ```
 
 ![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
-Looking at our results, it appears that there are still some significant
-lags. The most significant of these are 1 and 12 for the acf and 1 and
-11 for the pacf. Generally though, these values look as though are data
-is stationary and ready for modeling.
+
+Looking at our results, it appears doing a seasonal difference is a more
+effective step for making our data stationary. While there are still
+some significant lags, the most significant of these are 1 and 12 for
+both the acf and the pacf, these values look as though are data is
+stationary and ready for modeling. Let’s quickly double check.
+
+``` r
+UK_power_monthly_ts %>%
+  features(difference(wind, lag=12), unitroot_kpss) %>% as.matrix()
+```
+
+    ##      kpss_stat kpss_pvalue
+    ## [1,]  0.110744         0.1
+
+We can see our test statistic is now greater than .05 which means our
+data is, in fact, stationary.
 
 Finally, let’s see if colinearity exists between our variables.
 
@@ -509,11 +523,10 @@ regclass::VIF(lm_fit)
 
 If we were to set a threshold a 5, our two variables which are above the
 threshold are demand and coal. These makes sense as coal has seen a
-massive decrease in usage and is very small as we approach 2023 which is
-inversely proportional to the trend of wind usage increasing. Demand
-also having high colinearity is intuitive because all power output is
-related to the current demand. Let’s try removing coal and see how these
-values change.
+massive decrease in usage which is inversely proportional to wind usage
+amongst other power sources. Demand having high colinearity is also
+intuitive because all power output is related to the current demand.
+Let’s try removing coal and see how these values change.
 
 ``` r
 lm_fit <- lm(wind ~ demand + nuclear + ccgt + pumped + hydro + total_other,
@@ -525,15 +538,11 @@ regclass::VIF(lm_fit)
     ##      demand     nuclear        ccgt      pumped       hydro total_other 
     ##    3.563102    2.137759    1.100620    4.086149    1.748490    1.934404
 
-Wow what a create result! After removing the coal predictor, we can see
-that there is now no predictor which shows large amounts of colinearity.
-We should consider this if a TSLM is used.
+Wow what a great result! After removing the coal predictor, there is now
+no predictor which shows large amounts of colinearity. We should
+consider this when modeling.
 
-## Model Selection
-
-<!-- For full points:
-&#10;At least two different models were considered. Model fit and residual diagnostics were thoroughly discussed (for all models).
-&#10;-->
+# Model Selection
 
 Before any models are fit, let’s first create a training and testing
 split with out data. Let’s also create a variable to handle the outlier
@@ -610,24 +619,11 @@ final model to make a prediction with:
 I belive the ETS and SARIMA models are good choices because our data
 shows an obvious trend, consistent seasonality, and a lack of wild
 variability in the errors. I believe the Dynamic Model is a good choice
-because we have a good number of predictors all of which are directly
+because we have a good number of predictors, all of which are directly
 correlated to our target variable, it will also allow us to account for
-the outlier.
+the outlier in the case it is chosen as a final model.
 
-One thing to note, to estimate the parameters for the SARIMA model, we
-will use the auto.arima() function from the forecast package.
-
-**Model Fitting**
-
-``` r
-auto.arima(train$wind, stationary=FALSE, seasonal=FALSE)
-```
-
-    ## Series: train$wind 
-    ## ARIMA(0,1,0) 
-    ## 
-    ## sigma^2 = 0.9485:  log likelihood = -176.85
-    ## AIC=355.7   AICc=355.73   BIC=358.55
+\###Model Fitting
 
 ``` r
 model_fits <- train %>%
@@ -662,26 +658,12 @@ model_fits$sarima
     ## <lst_mdl[1]>
     ## [1] <ARIMA(1,0,0)(0,1,1)[12] w/ drift>
 
-Interestingly, the SARIMA model chose to not take both a normal and
-seasonal difference, instead just doing one seasonal difference. Let’s
-explore the acf and pacf plots to see if we can explain this plus the
-other chosen parameters for the model.
+As we can see, the SARIMA model also chose to only take a seasonal
+difference as we saw might be a good decision previously.
 
-``` r
-train %>%
-  gg_tsdisplay(difference(wind, lag=12), plot_type="partial")
-```
+### Model Testing
 
-![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-33-1.png)<!-- -->
-Because of the lack of trend in the first plot, it makes sense that no
-non-seasonal differencing was done as it appears the seasonal
-differencing removed it. Therefore, no further steps were taken to make
-the data stationary. The AR(1) was likely chosen because a lag of one is
-showing the most influence on the observations (seen in the acf), and
-the SMA(1) is likely chosen because the residuals at a lag of 12 are
-having influence on the observation (seen in the pacf).
-
-Now lets test the models on the test set.
+Now, lets test the models on the test set.
 
 ``` r
 test_predictions <- model_fits %>% forecast(test)
@@ -700,39 +682,18 @@ test_predictions %>%
   )
 ```
 
-![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-35-1.png)<!-- -->
-Wow! all of our models seem to be doing really well. Of the models, it
+![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-34-1.png)<!-- -->
+
+Wow! All of our models seem to be doing really well. Of the models, it
 appears that the SARIMA model is the most performant. Aside from the
-line aligning well with the actual data, its error bars the by far the
-smallest. Comparing this to ETS which looks to be the second most
-accurate model based on the line, which is noticably quite good, we can
-see that SARIMA’s error bars are far tighter. This is important as
-although it is performing well here, in the future, when comparing its
-predictions to additional out-sample test data, we may find that the
-variance of these predictions makes it a poor model. Let’s double check
-that SARIMA is performing the best by examining the residual
-diagnostics.
-
-``` r
-test_predictions
-```
-
-    ## # A fable: 66 x 11 [1M]
-    ## # Key:     .model [3]
-    ##    .model     date         wind .mean demand nuclear  ccgt pumped hydro total_…¹
-    ##    <chr>     <mth>       <dist> <dbl>  <dbl>   <dbl> <dbl>  <dbl> <dbl>    <dbl>
-    ##  1 ets    2022 Jan  N(7.7, 2.6)  7.69   34.6    5.50 13.9   0.300 0.474     7.69
-    ##  2 ets    2022 Feb    N(8, 2.9)  7.95   31.9    5.11  7.73  0.261 0.662     9.43
-    ##  3 ets    2022 Mar    N(6.6, 2)  6.58   31.0    5.68 12.3   0.213 0.481     7.89
-    ##  4 ets    2022 Apr  N(5.2, 1.3)  5.25   28.6    5.47 12.9   0.185 0.277     5.16
-    ##  5 ets    2022 May    N(5, 1.3)  5.04   28.0    5.47 13.8   0.225 0.309     3.42
-    ##  6 ets    2022 Jun N(4.1, 0.86)  4.12   27.2    5.75 13.0   0.165 0.270     3.50
-    ##  7 ets    2022 Jul N(3.5, 0.65)  3.53   27.6    4.77 13.5   0.170 0.262     3.93
-    ##  8 ets    2022 Aug  N(4.5, 1.1)  4.45   26.7    4.50 14.3   0.170 0.190     4.31
-    ##  9 ets    2022 Sep  N(5.6, 1.7)  5.60   28.6    4.56 13.7   0.182 0.147     2.66
-    ## 10 ets    2022 Oct    N(7, 2.7)  6.99   28.7    4.50 11.5   0.223 0.502     3.57
-    ## # … with 56 more rows, 1 more variable: outlier <dbl>, and abbreviated variable
-    ## #   name ¹​total_other
+line aligning well with the actual data, its error bars are by far the
+smallest. Comparing this to ETS, which looks to be the second most
+accurate model based on the line, we can see that SARIMA’s error bars
+are much tighter. This is important as although it is performing well
+here, in the future, when comparing its predictions to additional
+out-sample test data, we may find that the variance of these predictions
+makes it a poor model. Let’s double check that SARIMA is performing the
+best by examining the residual diagnostics.
 
 ``` r
 temp1 = test_predictions %>%
@@ -759,10 +720,10 @@ left_join(temp1, temp2, by = ".model") %>% select(-.type)
 
 Looking at the distributional and point accuracies, we can see that on
 almost every metric, the SARIMA model is the most performant. That being
-said, when looking at the MAPE metric, which is generally the most
-common time series metric, ETS is very slightly better. MAPE measures
-how well the predictions matched the line over the whole period and like
-we said earlier, ETS does appear to model our test set well.
+said, when looking at the MAPE metric, which is a very common time
+series metric, ETS is very slightly better. MAPE measures how well the
+predictions matched the line over the whole period and like we said
+earlier, ETS does appear to model our test set well.
 
 With these results in mind, we will make final predictions using both a
 SARIMA and ETS model. That being said, because SARIMA performed better
@@ -770,17 +731,13 @@ on almost every metric and because the variance of its errors was
 significantly smaller, if the predictions are wildly different, we will
 trust the SARIMA’s prediction more.
 
-## Forecast
+# Forecast
 
-<!-- For full points:
-&#10;At least one forecast was made using actual data and another using a forecasting method. Forecasts were visualized and confidence bands were interpreted. Point and distributional fit measures were discussed for both.
-&#10;-->
-
-We will now make a forecast Since the total wind power usage in UK in
-2030. Since neither ETS or SARIMA need additional data to make a
+We will now make a forecast for the total wind power usage in UK in
+2030. Since neither ETS or SARIMA needs additional data to make a
 forecast, we can skip over the data generating process.
 
-Before anything, we need to refit our models to our entire dataset.
+Before anything, we need to refit our models to our entire data set.
 
 ``` r
 final_model_fits <- UK_power_monthly_ts %>%
@@ -815,19 +772,7 @@ final_forecasts
     ## 10 ets    2024 Aug N(5.5, 1.6)  5.50
     ## # … with 162 more rows
 
-Before we interpret these results, let’s first make a linear model for
-demand to see if our results make sense given some context.
-
-``` r
-demand_fit <- lm(
-  demand ~ date,
-  data=UK_power_monthly_ts
-)
-
-demand_predictions <- predict.lm(demand_fit, newdata = data.frame(date=prediction_dates))
-```
-
-Now, let’s plot everything.
+Let’s plot these:
 
 ``` r
 final_forecasts %>%
@@ -835,14 +780,6 @@ final_forecasts %>%
   geom_line(
     data = UK_power_monthly_ts %>% filter(year(date) > 2018),
     aes(y=wind, color='train')
-  ) +
-  geom_line(
-    data = UK_power_monthly_ts %>% filter(year(date) > 2018),
-    aes(y=demand, color='Actual Demand')
-  ) +
-  geom_line(
-    data = data.frame(date=final_forecasts$date, demand=demand_predictions),
-    aes(y=demand, color='Demand Linear Model')
   ) +
   labs(
     title = "Final Model Forecasts for UK's Wind Power Usage Through 2030",
@@ -852,9 +789,9 @@ final_forecasts %>%
   )
 ```
 
-![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-40-1.png)<!-- -->
+![](rosen_daniel_forecasting_project_files/figure-gfm/unnamed-chunk-37-1.png)<!-- -->
 
-## Interpretation
+# Interpretation
 
 Final Predictions For UK’s wind power usage in December 2023:
 
@@ -876,25 +813,21 @@ captured the cyclical nature as well as the trend of the UK’s current
 wind power output. Looking closer it appears that ETS model’s
 predictions have slightly higher peaks and noticeably lower valleys.
 When compared to the actual data, these valleys seem to be somewhat of
-underestimates. Again, as we said previously, we are inclined to trust
-our SARIMA model more. When looking at our final predictions for
-December of 2030, ETS predicts a slightly higher value of 14.51
-gigawatts of wind power production while SARIMA predicts 12.44
-gigawatts. This has to do with ETS having slightly higher peaks and
-SARIMA capturing small negative dips before its maximum of each seasonal
-cycle and our predictions being cut off right before its maximum. Next,
-looking at the demand predictions we can see our linear model predicts a
-continued, steep, downward trend. Contextually, this makes sense with
-data as we had seen a downward trend in demand for some years, but
-intuitively this is likely not a good prediction and this trend will not
-continue as the population will continue to grow which will drive demand
-upwards.
+underestimates. Again, we are inclined to trust our SARIMA model more.
+When looking at our final predictions for December of 2030, ETS predicts
+a slightly higher value of 14.51 gigawatts of wind power production
+while SARIMA predicts 12.44 gigawatts. This has to do with ETS having
+slightly higher peaks and SARIMA capturing small negative dips before
+its maximum of each seasonal cycle which is cut off for its last cycle.
+Overall, given only the past data these predictions seems very
+reasonable albeit, probably not meeting the hopes of most climate
+scientists.
 
 Now let’s reconcile our results real world information:
 
 According to renewableUK \[1\], the UK’s target for onshore wind power
 capacity by 2030 is 30 gigawatts (GW). This is up from the current
-capacity of 13.8 GW.The UK’s target for offshore wind power capacity by
+capacity of 13.8 GW. The UK’s target for offshore wind power capacity by
 2030 is 50 GW. Total, the UK has the ambitious goal of reaching 80GW of
 wind power by 2030. This capacity would be enough to power every home in
 Britain and would support the UK target of reaching net zero by 2050.
@@ -902,13 +835,13 @@ Britain and would support the UK target of reaching net zero by 2050.
 estimated 3,200 new, larger wind turbines by 2030. This would be roughly
 three new turbines every two days. It is questionable if this is
 feasible. It is especially questionable since, according to The Guardian
-\[3\], that the English windfarms built onshore in the seven years since
-the restrictions were introduced have reached a total capacity of only
-6.7 megawatts \[as of four months ago\]. This is just 0.02% of the
-onshore wind needed in England based on forecasts provided by National
-Grid to meets its share of the UK’s goal. Although other parts of the UK
-are contributing more significantly, at this pace it would take 4,690
-years for England to meet its share of this target.
+\[3\], the English windfarms built onshore in the seven years since the
+restrictions were introduced have reached a total capacity of only 6.7
+megawatts \[as of four months ago\]. This is just 0.02% of the onshore
+wind needed in England to meets its share of the UK’s goal based on
+forecasts provided by National Grid. Although other parts of the UK are
+contributing more significantly, at this pace it would take 4,690 years
+for England to meet its share of this target.
 
 So do our predictions make sense?
 
@@ -927,3 +860,9 @@ governmental aims, may be closer to a realistic scenario considering the
 recent installation trends and challenges.
 
 Thanks for following along!
+
+### Sources:
+
+1)  <https://www.renewableuk.com/news/583055/Industry-urges-Government-to-set-new-target-to-double-UK-onshore-wind-capacity-by-2030.htm#>:~:text=*%20RenewableUK’s%20members%20are%20building%20our%20future%20energy%20system%2C%20powered%20by%20clean%20electricity.&text=*%20The%20UK%2Dwide%20target%20of%2030GW%20by,(1.3GW)%20and%202.5GW%20in%20Northern%20Ireland%20(1.3GW).
+2)  <https://www.newcivilengineer.com/latest/rate-of-wind-turbine-installation-needs-to-be-tripled-for-uk-to-hit-2030-target-06-09-2022/#>:~:text=This%20capacity%20would%20be%20enough,new%20turbines%20every%20two%20days.
+3)  <https://www.theguardian.com/business/2023/jun/07/england-4700-years-from-building-enough-onshore-windfarms#>:~:text=National%20Grid’s%20influential%20industry%20forecast,target%2C%20according%20to%20the%20IPPR.
