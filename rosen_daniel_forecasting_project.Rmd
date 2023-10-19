@@ -1,0 +1,428 @@
+---
+title: "Forecasting Project"
+author: "DANIEL ROSEN"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, cache = TRUE)
+library(fpp3)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(forecast)
+```
+
+The goal of this project is to forecast the England's future wind power usage. Since 2016 England has began increasing its use of wind power. I am curious if and how that trend will continue. To conduct this analysis, I grabbed a time series data set from https://www.gridwatch.templar.co.uk/, a website which monitors electricity usage in England in real time. This dataset is a csv which contains time series data about total demand and output levels of different energy sources, with data points from every 5 minutes since 12:00 AM, January 1, 2012 until 11:55 PM, October 15, 2023. Within this data set there are 23 variables with all electricity measurements in Gigawatts, one for total demand, one for frequency which represents the imbalance between supply and demand, one for the measure of power flow recorded from the North to the South of England, and 21 for different energy sources, plus an id column and a timestamp column. These energy sources are coal, nuclear, combine cycle turbine stations, wind, pumped hydroelectric, hydroelectric, biomass, oil, solar, open cycle turbine plants, import/export amounts from France, Nederlands, Ireland, Wales, Belgium, Scotland, Norway, and other which represents all other sources. 
+
+## Forecasting Considerations
+
+<!-- For full points:
+
+Additional factors were considered thoroughly. One or more additional factors were modeled.
+
+-->
+### Processing: 
+First, let's load the data.
+```{r}
+raw <- read.csv('./data/gridwatch.csv')
+glimpse(raw)
+```
+Wow this is a large dataset. I believe it is a good idea to reduce the number of features and the number of rows. Let's do this now. First we will combine the ict columns, nemo, and nsl columns with the other column then remove the originals. Also, it appears oil, solar, biomass, and ocgt are only occasionally used so lets add them to other as well. Let's also remove the north_south column as this likely won't be a good predictor for coal usage. 
+
+```{r}
+library(dplyr)
+
+reduced <- raw %>%
+  group_by(timestamp) %>%
+  mutate(
+    total_other = sum(
+      oil,
+      solar,
+      biomass,
+      ocgt,
+      french_ict,
+      dutch_ict,
+      irish_ict,
+      ew_ict,
+      intelec_ict,
+      nemo,
+      ifa2,
+      other,
+      scotland_england,
+      nsl,
+      na.rm = TRUE
+      )
+  ) %>% 
+  select(-c(
+    oil,
+    solar,
+    biomass,
+    ocgt,
+    french_ict,
+    dutch_ict,
+    irish_ict,
+    ew_ict,
+    intelec_ict,
+    nemo,
+    ifa2,
+    other,
+    scotland_england,
+    nsl,
+    north_south
+    )
+  )
+
+glimpse(reduced)
+```
+We can see that total_other now is non_zero but is relatively small compared to other sources. This seems like a better predictor now and will probably aid the models' training time. 
+```{r}
+min(reduced$total_other)
+```
+Let's remove negative values which appear to be incorrect values.
+```{r}
+(reduced <- reduced %>% mutate(total_other = ifelse(total_other < 0, 0, total_other)))
+```
+```{r}
+min(reduced$total_other)
+```
+Now, because we are only predicting if coal usage will continue going down, we do not need the granularity of time points every five minutes. Let's aggregate to daily averages and see how many rows we are left with to see if we need to aggregate further. 
+
+```{r}
+# Convert 'timestamp' to a Date-Time object
+reduced$timestamp <- ymd_hms(reduced$timestamp)
+
+# Extract just the date from 'timestamp'
+reduced$date <- as.Date(reduced$timestamp)
+
+# Group by the 'date' and sum all other columns
+aggregated_to_date <- reduced %>%
+  group_by(date) %>%
+  summarise(
+    across(everything(), mean, na.rm = TRUE),
+    .groups = 'drop')
+
+glimpse(aggregated_to_date)
+```
+This leaves us with only 4,306 rows. This is not too large and should hopefully be a good level of granularity. If not, we can aggregate further later. Next, let's drop the id column, the timestamp column, and the frequency column as we can assume that this measure will generally not fluctuate much, and if it does, it means England does not have enough power to mean its citizens' demands. We can assume this will only happen during an emergency which would be an outlier and would not be useful in forecasting.
+
+```{r}
+england_power <- aggregated_to_date %>% select(-c(id, frequency, timestamp))
+glimpse(england_power)
+```
+
+
+Finally, let's save this processed dataset to a csv and create a tsibble to work with.
+
+```{r}
+write.csv(england_power, "./data/england_power_processed.csv")
+
+england_power_ts <- as_tsibble(england_power, index=date)
+england_power_ts
+```
+This seems like an excellent time series.
+## Decomposition
+
+<!-- For full points:
+
+Trend and seasonality were decomposed and their appropriateness were discussed. Model parameters were reported. Visualizations were used.
+
+-->
+
+### Exploration
+Let's begin exploring our data. First let's graph our variables over time and our target variable `wind` over time.
+
+```{r}
+ggplot(england_power_ts, aes(x = date)) +
+  geom_line(aes(y = demand, color = "Demand"), size = 1) +
+  geom_line(aes(y = wind, color = "Wind power"), size = 1) +
+  ggtitle("Demand and Wind Usage over Time") +
+  xlab("Date") +
+  ylab("Average Daily (GW)")
+```
+This data is highly variable. I think it will be a good idea to further aggregate to monthly averages. This will allow us to handle seasonality better and since we are predicting into the future and looking for general trends, monthly average predictions are likely better anyways as they give us a lower variance understanding of supply and demand. Let's do that now.
+
+```{r}
+aggregated_to_month <- as.data.frame(england_power_ts) %>%
+  mutate(date_months = tsibble::yearmonth(floor_date(date, "month"))) %>%
+  group_by(date_months) %>%
+  summarise(
+    across(
+      everything(),
+      mean,
+      na.rm = TRUE
+      ),
+    .groups = 'drop'
+    )
+
+
+england_power_monthly_ts <- as_tsibble(
+  aggregated_to_month %>% select(-date) %>% rename(c(date = date_months)),
+  index = date)
+
+#england_power_monthly_ts <- england_power_monthly_ts %>% fill_gaps() %>% drop_na()
+
+# Fill NA values with the previous non-NA value
+#england_power_monthly_ts <- england_power_monthly_ts %>% 
+  #fill(everything(), .direction = "down")
+
+glimpse(england_power_monthly_ts)
+```
+Let's plot it again to see how it looks.
+```{r}
+ggplot(england_power_monthly_ts, aes(x = date)) +
+  geom_line(aes(y = demand, color = "Demand"), size = 1) +
+  geom_line(aes(y = wind, color = "Wind power"), size = 1) +
+  ggtitle("Demand and Wind Usage over Time") +
+  xlab("Date") +
+  ylab("Average Daily (GW)")
+```
+That looks much better! Lets save that as a csv and continue.
+```{r}
+write.csv(england_power_monthly_ts, './data/england_power_monthly.csv')
+```
+
+
+Now let's inspect all of our predictor variables.
+```{r}
+england_power_monthly_ts %>%
+  gather(
+    "energy_source",
+    "average_monthly_usage",
+    -c(date, wind)
+  ) %>%
+  ggplot(aes(x = date, y = average_monthly_usage, colour = energy_source)) +
+  geom_line() +
+  facet_grid(vars(energy_source), scales = "free_y") +
+  labs(y="Average Monthly Usage (GW)") +
+  guides(colour="none")
+```
+These look great! The one observation I am taking away from this is total demand has had a slight downard trend. This is interesting, as one might expect that as time goes on, populations will continue to rise and therefore demand should too. The data implies that this is not actually the case. 
+
+Now let's explore trend and seasonality. 
+```{r}
+england_power_monthly_ts %>%
+  gg_tsdisplay(wind, plot_type="partial")
+```
+### Let's analyze these graphs. 
+
+Time series Plot:
+From this plot it is easily observed that there exists a noticeable upward trend in the wind power usage. Further, there appears to be regular peaks and valleys, suggesting a seasonal component. Contextually, these make sense as we know England has increased its wind power usage and throughout the year, due to changes in temperature amongst other things power demand fluctuates and therefore, since wind makes up a percentage the supply of the power output to meet that demand.
+
+ACF (Autocorrelation Function) Plot:
+There are several things to take away from this graph.
+
+- The auto-correlations show a slow decay with significant values at specific lags. This provides futher evidence for both an underlying trend and potential seasonality.
+- The significant spike around the 12-month mark suggests an annual seasonality in the data. 
+- The lack of a quick decay of the auto-correlations suggests that the data is likely not stationary.
+
+PACF (Partial Autocorrelation Function) Plot:
+What to take away form this plot:
+
+- The significance spike at Lag 1 implies that the current value is directly influenced by its immediate previous value. This can indicate a short-term momentum or auto-regressive nature in the series.
+- The sharp drop of partial auto-correlations after Lag 1 then reemergence of significance in later lags (around 12 months) suggests the time series is most influenced by the immediate past and by the somewhat distant past. Because it is more significant around 12 months, it adds further evidence for annual seasonality. 
+
+
+Now, that there is evidence that the time series is not stationary, lets perform the Ljung-Box test to confirm if the time series is in fact not stationary. 
+
+```{r}
+england_power_monthly_ts %>%
+  features(wind, unitroot_kpss) %>% as.matrix()
+```
+Because the test statistic is less than .05, we know that the time series is non-stationary. We can interpret this as, the likelihood that there is not an effect of the old points is very low.
+
+Knowing this, let's now check if differencing and or seasonal differencing should be performed to make the time series stationary.
+```{r}
+#Differencing
+england_power_monthly_ts %>% features(wind, unitroot_ndiffs) %>%
+  as.matrix()
+
+#Seasonal Differencing
+england_power_monthly_ts %>% features(wind, unitroot_nsdiffs) %>%
+  as.matrix()
+```
+From our results, it appears that it is necessary to perform one round of differencing and one round of seasonal differencing to make our data stationary. 
+
+First, let's take the difference and observe our plots then decide what lag we should difference at for seasonal differencing. 
+```{r}
+england_power_monthly_ts %>%
+  gg_tsdisplay(difference(wind), plot_type="partial")
+```
+After taking the first difference it appears the trend has been removed but it appears some seasonality remains. Looking at the acf plot, it seems like taking a seasonal difference at 12 months makes season, especially since we already suspect there is annual seasonality. One thing to keep in mind, is that there appears to be an outlier circa 2023 which may need to be accounted for for a TSLM.
+
+Now let's take a seasonal difference.
+```{r}
+england_power_monthly_ts %>%
+  gg_tsdisplay(difference(difference(wind), lag=12), plot_type="partial")
+```
+Looking at our results, it appears that there are still some significant lags. The most significant of these are 1 and 12 for the acf and 1 and 11 for the pacf. Generally though, these values look as though are data is stationary and ready for modeling. 
+
+
+Finally, let's see if colinearity exists between our variables.
+```{r}
+colnames(england_power_monthly_ts)
+```
+
+```{r}
+
+lm_fit <- lm(wind ~ demand + coal + nuclear + ccgt + pumped + hydro + total_other,
+             data = england_power_monthly_ts)
+
+regclass::VIF(lm_fit)
+```
+If we were to set a threshold a 5, our two variables which are above the threshold are demand and coal. These makes sense as coal has seen a massive decrease in usage and is very small as we approach 2023 which is inversely proportional to the trend of wind usage increasing. Demand also having high colinearity is intuitive because all power output is related to the current demand. Let's try removing coal and see how these values change.
+
+```{r}
+lm_fit <- lm(wind ~ demand + nuclear + ccgt + pumped + hydro + total_other,
+             data = england_power_monthly_ts)
+
+regclass::VIF(lm_fit)
+```
+Wow what a create result! After removing the coal predictor, we can see that there is now no predictor which shows large amounts of colinearity. We should consider this if a TSLM is used.
+
+## Model Selection
+
+<!-- For full points:
+
+At least two different models were considered. Model fit and residual diagnostics were thoroughly discussed (for all models).
+
+-->
+Before any models are fit, let's first create a training and testing split with out data. Let's also create a variable to handle the outlier in our data and drop the coal variable to reduce colinearity.
+
+```{r}
+model_ts <- england_power_monthly_ts %>%
+  select(-coal)
+
+model_ts$outlier <- rep(0, nrow(model_ts))
+model_ts$outlier[
+  which.min(difference(model_ts$wind))
+] <- 1
+
+unique(model_ts$outlier)
+```
+```{r}
+22/nrow(model_ts)
+```
+If we were to use 2022 and on as the testing set, that would be about 15 percent of the data which seems like a good value.
+```{r}
+train <- model_ts %>% filter(year(date) < 2022)
+test <- model_ts %>% filter(year(date) >= 2022)
+```
+```{r}
+tail(train)
+```
+```{r}
+head(test)
+```
+It looks like our outlier actually ends up being in the testing data. This means it will not affect our in-sample model fits. Let's leave it in though as it will likely help our final predictions.
+
+
+After exploring the data in the first section, I believe testing the fit of the following three models will be effective in giving us a perfomant final model to make a prediction with:
+
+- ETS
+- Dynamic Model (TSLM + ARIMA Errors)
+- SARIMA
+
+I belive the ETS and SARIMA models are good choices because our data shows an obvious trend, consistent seasonality, and a lack of wild variability in the errors. I believe the Dynamic Model is a good choice because we have a good number of predictors all of which are directly correlated to our target variable, it will also allow us to account for the outlier.
+
+One thing to note, to estimate the parameters for the SARIMA model, we will use the auto.arima() function from the forecast package. 
+
+**Model Fitting**
+
+```{r}
+auto.arima(train$wind, stationary=FALSE, seasonal=FALSE)
+```
+
+
+```{r}
+model_fits <- train %>%
+  model(
+    #ETS model
+    ets = ETS(wind),
+    #Dynamic model
+    dynamic = ARIMA(wind ~ demand + nuclear + ccgt + pumped + hydro + total_other + outlier),
+    #SARIMA model
+    sarima = ARIMA(wind)
+)
+```
+
+```{r}
+model_fits$ets
+```
+
+```{r}
+model_fits$dynamic
+```
+
+```{r}
+model_fits$sarima
+```
+
+Interestingly, the SARIMA model chose to not take both a normal and seasonal difference, instead just doing one seasonal difference. Let's explore the acf and pacf plots to see if we can explain this plus the other chosen parameters for the model.
+```{r}
+train %>%
+  gg_tsdisplay(difference(wind, lag=12), plot_type="partial")
+```
+Because of the lack of trend in the first plot, it makes sense that no non-seasonal differencing was done as it appears the seasonal differencing removed it. Therefore, no further steps were taken to make the data stationary. The AR(1) was likely chosen because a lag of one is showing the most influence on the observations (seen in the acf), and the SMA(1) is likely chosen because the residuals at a lag of 12 are having influence on the observation (seen in the pacf). 
+
+Now lets test the models on the test set.
+```{r}
+test_predictions <- model_fits %>% forecast(test)
+```
+
+```{r}
+test_predictions %>%
+  autoplot() +
+  geom_line(
+    data = train %>% filter(year(date) > 2019),
+    aes(y=wind, color='train')
+  ) +
+  geom_line(
+    data = test,
+    aes(y=wind)
+  )
+```
+Wow! all of our models seem to be doing really well. Of the models, it appears that the SARIMA model is the most performant. Aside from the line aligning well with the actual data, its error bars the by far the smallest. Comparing this to ETS which looks to be the second most accurate model based on the line, which is noticably quite good, we can see that SARIMA's error bars are far tighter. This is important as although it is performing well here, in the future, when comparing its predictions to additional out-sample test data, we may find that the variance of these predictions makes it a poor model. Let's double check that SARIMA is performing the best by examining the residual diagnostics.
+
+```{r}
+test_predictions
+```
+
+```{r}
+temp1 = test_predictions %>%
+  fabletools::accuracy(test) %>%
+  select(.model, ME, RMSE, MPE, MAPE)
+
+# Compute distributional accuracy estimates
+temp2 = test_predictions %>%
+  fabletools::accuracy(
+    data = test,
+    list(winkler = winkler_score,
+    crps = CRPS)
+  ) 
+
+left_join(temp1, temp2, by = ".model") %>% select(-.type)
+```
+Looking at the distributional and point accuracies, we can see that on almost every metric, the SARIMA model is the most performant. That being said, when looking at the MAPE metric, which is generally the most common time series metric, ETS is very slightly better. MAPE measures how well the predictions matched the line over the whole period and like we said earlier, ETS does appear to model our test set well. Regardless, because we saw that our error bands from the prediction plot showed that ETS is more variable and because SARIMA is better in every other regard, we will choose SARIMA as our final predictor model.
+
+## Forecast
+
+<!-- For full points:
+
+At least one forecast was made using actual data and another using a forecasting method. Forecasts were visualized and confidence bands were interpreted. Point and distributional fit measures were discussed for both.
+
+-->
+
+## Interpretation
+
+<!-- For full points:
+
+Interpretation of the forecast was based on past and present knowledge of the stock and how it's situated in the investment ecosystem. Differences between forecast and actual are discussed based on current knowledge or events.
+
+-->
+
+
+
+
+
+
